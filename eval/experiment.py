@@ -26,6 +26,9 @@ import anthropic
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import app.telemetry  # noqa: F401 — Phoenix auto-traces all Haiku judge calls
+from opentelemetry import trace
+
+_tracer = trace.get_tracer("sourcerer.eval")
 
 DATASETS_DIR = os.path.join(os.path.dirname(__file__), "datasets")
 
@@ -50,6 +53,9 @@ def _load(path: str) -> list[dict]:
 
 # ── Haiku judges (run in parallel) ───────────────────────────────────────────
 
+_VERDICT_SCORE = {"correct": 1.0, "partial": 0.5, "incorrect": 0.0}
+
+
 async def _judge_one(
     client: anthropic.AsyncAnthropic,
     question: str,
@@ -73,12 +79,37 @@ async def _judge_one(
     return "correct"
 
 
-async def _score_all(rows: list[dict]) -> list[str]:
+async def _judge_pair(
+    client: anthropic.AsyncAnthropic,
+    b_row: dict,
+    p_row: dict,
+) -> tuple[str, str]:
+    """Judge one question pair and emit a Phoenix span with both verdicts."""
+    question = b_row["question"]
+    reference = b_row["reference_answer"]
+    b_verdict, p_verdict = await asyncio.gather(
+        _judge_one(client, question, reference, b_row["answer"]),
+        _judge_one(client, question, reference, p_row["answer"]),
+    )
+    with _tracer.start_as_current_span("eval.question") as span:
+        span.set_attribute("eval.question", question[:300])
+        span.set_attribute("eval.baseline_verdict", b_verdict)
+        span.set_attribute("eval.baseline_score", _VERDICT_SCORE[b_verdict])
+        span.set_attribute("eval.pipeline_verdict", p_verdict)
+        span.set_attribute("eval.pipeline_score", _VERDICT_SCORE[p_verdict])
+        span.set_attribute("eval.pipeline_confidence", p_row.get("confidence") or 0.0)
+        span.set_attribute("eval.delta", _VERDICT_SCORE[p_verdict] - _VERDICT_SCORE[b_verdict])
+    return b_verdict, p_verdict
+
+
+async def _score_all(baseline_rows: list[dict], pipeline_rows: list[dict]) -> tuple[list[str], list[str]]:
     client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    return list(await asyncio.gather(*[
-        _judge_one(client, r["question"], r["reference_answer"], r["answer"])
-        for r in rows
-    ]))
+    pairs = await asyncio.gather(*[
+        _judge_pair(client, b, p) for b, p in zip(baseline_rows, pipeline_rows)
+    ])
+    b_verdicts = [pair[0] for pair in pairs]
+    p_verdicts = [pair[1] for pair in pairs]
+    return b_verdicts, p_verdicts
 
 
 # ── Metrics + display ─────────────────────────────────────────────────────────
@@ -163,8 +194,26 @@ def main() -> None:
     n = min(len(baseline_rows), len(pipeline_rows))
 
     print(f"Judging {n} question pairs with Haiku (parallel)...")
-    b_verdicts = asyncio.run(_score_all(baseline_rows[:n]))
-    p_verdicts = asyncio.run(_score_all(pipeline_rows[:n]))
+
+    async def run() -> tuple[list[str], list[str]]:
+        with _tracer.start_as_current_span("eval.experiment") as span:
+            span.set_attribute("eval.dataset", args.dataset)
+            span.set_attribute("eval.n_questions", n)
+            b_v, p_v = await _score_all(baseline_rows[:n], pipeline_rows[:n])
+            b_acc = _accuracy(b_v)
+            p_acc = _accuracy(p_v)
+            avg_conf = sum(r.get("confidence", 0.0) for r in pipeline_rows[:n]) / max(n, 1)
+            span.set_attribute("eval.baseline_accuracy", round(b_acc, 4))
+            span.set_attribute("eval.pipeline_accuracy", round(p_acc, 4))
+            span.set_attribute("eval.delta_pp", round((p_acc - b_acc) * 100, 1))
+            span.set_attribute("eval.avg_pipeline_confidence", round(avg_conf, 4))
+            span.set_attribute("eval.baseline_correct", b_v.count("correct"))
+            span.set_attribute("eval.pipeline_correct", p_v.count("correct"))
+            span.set_attribute("eval.baseline_incorrect", b_v.count("incorrect"))
+            span.set_attribute("eval.pipeline_incorrect", p_v.count("incorrect"))
+        return b_v, p_v
+
+    b_verdicts, p_verdicts = asyncio.run(run())
 
     _print_table(args.dataset, pipeline_rows[:n], b_verdicts, p_verdicts)
     _save_scored(args.dataset, baseline_rows[:n], pipeline_rows[:n], b_verdicts, p_verdicts)
