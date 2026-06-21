@@ -1,28 +1,42 @@
 @import "tailwindcss";
 
-/* Tailwind v4 design tokens (OKLCH). Defining --color-* here generates the
-   matching bg-/text-/border- utilities (e.g. border-verified, bg-disputed/10). */
+/* ═══════════════════════════════════════════════════════════════════════════════
+   SOURCERER — Hogwarts-Inspired Dark Theme
+   Deep castle-stone backgrounds, warm parchment text, golden accents,
+   gem-toned trust signals.
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
 @theme inline {
+  /* Typography */
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Cinzel", "Georgia", serif;
+  --font-display: "Cinzel Decorative", "Cinzel", serif;
 
-  --color-background: oklch(0.985 0 0); /* zinc-50-ish clean surface */
-  --color-foreground: oklch(0.21 0.006 285);
-  --color-muted: oklch(0.55 0.01 285);
-  --color-border: oklch(0.92 0.004 286);
+  /* Core palette — castle at night */
+  --color-background: oklch(0.16 0.02 280);      /* deep navy charcoal */
+  --color-surface: oklch(0.20 0.02 275);          /* slightly lighter card */
+  --color-surface-raised: oklch(0.24 0.02 270);   /* hover / raised card */
+  --color-foreground: oklch(0.92 0.03 85);        /* warm parchment cream */
+  --color-muted: oklch(0.58 0.02 280);            /* dusty silver-lavender */
+  --color-border: oklch(0.32 0.02 60);            /* warm grey with gold tint */
+  --color-gold: oklch(0.78 0.16 75);              /* Hogwarts gold — primary accent */
+  --color-gold-dim: oklch(0.55 0.12 75);          /* subdued gold */
 
-  /* Trust status */
-  --color-verified: oklch(0.68 0.14 165); /* mint */
-  --color-disputed: oklch(0.78 0.16 75); /* amber */
-  --color-hallucination: oklch(0.65 0.22 18); /* rose */
+  /* Trust status — gem tones */
+  --color-verified: oklch(0.62 0.17 160);         /* emerald */
+  --color-disputed: oklch(0.75 0.15 75);          /* amber crystal */
+  --color-hallucination: oklch(0.58 0.20 18);     /* ruby */
 
-  /* Persona accents */
-  --color-skeptic: oklch(0.64 0.16 40); /* terracotta */
-  --color-factcheck: oklch(0.6 0.16 255); /* blue */
-  --color-beginner: oklch(0.68 0.15 150); /* green */
-  --color-explainer: oklch(0.58 0.18 300); /* purple */
-  --color-defender: oklch(0.55 0.18 275); /* indigo */
-  --color-consensus: oklch(0.8 0.15 95); /* yellow */
+  /* Persona accents — Hogwarts-house-inspired */
+  --color-skeptic: oklch(0.58 0.19 25);           /* Gryffindor scarlet */
+  --color-factcheck: oklch(0.55 0.14 255);        /* Ravenclaw blue */
+  --color-beginner: oklch(0.60 0.15 155);         /* Slytherin emerald */
+  --color-explainer: oklch(0.52 0.18 300);        /* purple */
+  --color-defender: oklch(0.50 0.17 275);         /* indigo */
+  --color-consensus: oklch(0.75 0.15 85);         /* Hufflepuff gold */
 }
+
+/* ── Base ──────────────────────────────────────────────────────────────────── */
 
 html,
 body,
@@ -38,7 +52,41 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Shimmer used by the loading status text */
+/* Subtle parchment texture via CSS noise-like gradient overlay on body */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse at 20% 0%, oklch(0.25 0.04 270 / 0.4) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 100%, oklch(0.20 0.05 30 / 0.25) 0%, transparent 50%);
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-background);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-gold-dim);
+}
+
+/* ── Shimmer — golden loading text ─────────────────────────────────────────── */
+
 @keyframes shimmer {
   0% {
     background-position: -200% center;
@@ -51,9 +99,9 @@ body {
 .shimmer-text {
   background: linear-gradient(
     90deg,
-    var(--color-muted) 0%,
-    var(--color-foreground) 50%,
-    var(--color-muted) 100%
+    var(--color-gold-dim) 0%,
+    var(--color-gold) 50%,
+    var(--color-gold-dim) 100%
   );
   background-size: 200% auto;
   background-clip: text;
@@ -62,11 +110,12 @@ body {
   animation: shimmer 2s linear infinite;
 }
 
-/* Lightweight enter animation (mimics animate-in fade-in) */
+/* ── Fade-in entrance ──────────────────────────────────────────────────────── */
+
 @keyframes fade-in {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -75,5 +124,126 @@ body {
 }
 
 .fade-in {
-  animation: fade-in 0.5s ease both;
+  animation: fade-in 0.6s ease both;
+}
+
+/* ── Golden glow pulse — used on hero heading ──────────────────────────────── */
+
+@keyframes glow-pulse {
+  0%, 100% {
+    text-shadow:
+      0 0 10px oklch(0.78 0.16 75 / 0.3),
+      0 0 30px oklch(0.78 0.16 75 / 0.15);
+  }
+  50% {
+    text-shadow:
+      0 0 18px oklch(0.78 0.16 75 / 0.5),
+      0 0 50px oklch(0.78 0.16 75 / 0.25);
+  }
+}
+
+.glow-pulse {
+  animation: glow-pulse 3s ease-in-out infinite;
+}
+
+/* ── Floating firefly dots — background ambience ───────────────────────────── */
+
+@keyframes float-up {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.5);
+  }
+  20% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 0.6;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-120px) scale(1);
+  }
+}
+
+.firefly {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--color-gold);
+  box-shadow: 0 0 6px 2px oklch(0.78 0.16 75 / 0.5);
+  animation: float-up 4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ── Click ripple ──────────────────────────────────────────────────────────── */
+
+@keyframes ripple-expand {
+  0% {
+    width: 0px;
+    height: 0px;
+    opacity: 0.6;
+  }
+  100% {
+    width: 150px;
+    height: 150px;
+    opacity: 0;
+  }
+}
+
+.click-ripple {
+  position: fixed;
+  border-radius: 50%;
+  border: 2px solid var(--color-gold);
+  box-shadow: 0 0 12px oklch(0.78 0.16 75 / 0.3);
+  pointer-events: none;
+  z-index: 9999;
+  transform: translate(-50%, -50%);
+  animation: ripple-expand 700ms ease-out forwards;
+}
+
+/* ── Card glow on hover ────────────────────────────────────────────────────── */
+
+.card-magical {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.card-magical:hover {
+  border-color: oklch(0.78 0.16 75 / 0.4);
+  box-shadow: 0 0 20px oklch(0.78 0.16 75 / 0.08);
+}
+
+/* ── Golden focus ring ─────────────────────────────────────────────────────── */
+
+.golden-focus:focus-within {
+  border-color: var(--color-gold);
+  box-shadow: 0 0 0 3px oklch(0.78 0.16 75 / 0.15);
+}
+
+/* ── Button — golden magical ───────────────────────────────────────────────── */
+
+.btn-gold {
+  background: linear-gradient(135deg, oklch(0.72 0.15 65), oklch(0.78 0.16 75), oklch(0.72 0.14 85));
+  color: oklch(0.15 0.02 280);
+  font-weight: 600;
+  transition: box-shadow 0.3s ease, transform 0.15s ease;
+}
+
+.btn-gold:hover {
+  box-shadow: 0 0 20px oklch(0.78 0.16 75 / 0.35);
+  transform: translateY(-1px);
+}
+
+.btn-gold:active {
+  transform: translateY(0px);
+}
+
+.btn-gold:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
 }
