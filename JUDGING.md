@@ -2,7 +2,7 @@
 
 > AI tutoring that proves its own answers. Chat with a tutor, then convert the conversation into a fact-checked, source-backed study post reviewed by multiple AI agents.
 
-**Live demo:** [sourcerer.vercel.app](https://sourcerer.vercel.app) (frontend) · backend on Render  
+**Live demo:** [edubot-swart.vercel.app](https://edubot-swart.vercel.app) (frontend) · backend on Render  
 **Repo:** github.com/davidmaking/education-blog-chatbot-unfinished
 
 ---
