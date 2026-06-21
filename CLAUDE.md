@@ -50,31 +50,52 @@ Learner question
   the final answer against. Keep it attached to each claim.
 - Teacher modes: **explain** (confidence-shaded), **quiz** (claims → questions), **Socratic**
   (withhold the answer, ask leading questions). Flashcards/concept map fall out of the claim set.
-- Keep the whole pipeline behind one `run_pipeline(question) -> PipelineResult` entry point.
-  Everything else (the FastAPI route, the Streamlit UI, the Fetch.ai agent in Phase 6) calls that
-  one function. A second entry point `reply_to_comment(comment: AgentComment, followup: str) ->
-  PipelineResult` handles follow-up questions on individual agent comments; it re-enters
-  `run_pipeline` with the original question + comment context injected as additional user context.
+### Two-phase UX: study first, check on demand (current flow)
 
-## Current implementation state (as of Phase 1 completion)
+The verification pipeline above does **not** run while the learner is studying. The product splits
+into two phases:
+
+1. **Tutoring phase (no checking).** The learner chats with the AI tutor turn by turn. Nothing is
+   fact-checked, grounded, or critiqued during this — it's a fast, plain teaching conversation.
+   Entry point: `chat(messages: list[ChatTurn]) -> str`.
+2. **Conversion phase (checking runs here).** When the learner clicks **"Convert to verifiable blog
+   post"**, the system synthesizes the conversation so far into a structured blog post and *then*
+   deploys the critic swarm + verifier + confidence pass over **that post**. The critique stays
+   visible as comments on the published post (it is *not* silently rewritten by a Teacher).
+   Entry point: `convert_to_blog_post(messages: list[ChatTurn]) -> PipelineResult` (`.title` = post
+   title, `.answer` = post body, `.comments` = the agent review).
+
+The 6-stage diagram above is the **accuracy engine**, shared by the conversion phase and by
+`run_pipeline` (the single-question path used by the eval harness + `POST /ask`). The shared
+critique→verify→confidence steps live in `pipeline._review(text, topic)`.
+
+`reply_to_comment(comment: AgentComment, followup: str, messages=None) -> str` handles follow-up
+questions on individual agent comments. It re-enters the **tutoring conversation** (via `chat`) with
+the commenting agent's context injected — so the learner keeps studying from that agent's
+perspective, and can later re-convert the enriched conversation into an updated post.
+
+## Current implementation state (as of Phase 4 completion + two-phase UX split)
 
 | Component | Status | Notes |
 |---|---|---|
-| `app/models.py` | ✅ Done | Pydantic `AgentComment` + `PipelineResult` |
-| `app/pipeline.py` | ✅ Done | `run_pipeline()` + `reply_to_comment()` — 2-stage (Generator→Teacher) |
-| `app/api.py` | ✅ Done | POST /ask, POST /reply, GET /health |
+| `app/models.py` | ✅ Done | `ChatTurn` + `AgentComment` + `PipelineResult` (now with `.title`) |
+| `app/pipeline.py` | ✅ Done | `chat()`, `convert_to_blog_post()`, `run_pipeline()`, `reply_to_comment()`; shared `_review()` |
+| `app/api.py` | ✅ Done | POST /chat, POST /convert, POST /ask, POST /reply, GET /health |
 | `app/telemetry.py` | ✅ Done | Phoenix auto-instrument |
-| `app/agents/generator.py` | ✅ Done | Sonnet, prompt caching |
-| `app/agents/teacher.py` | ✅ Done | Sonnet, prompt caching |
-| `ui/streamlit_app.py` | ✅ Skeleton | Text input + answer only; blog-post UI pending (Phase 5) |
-| `app/agents/critics.py` | ❌ Phase 2 | Haiku, parallel critic swarm |
-| `app/agents/verifier.py` | ❌ Phase 2 | Stagehand/Browserbase evidence extraction |
-| `app/grounding/browser.py` | ❌ Phase 2 | Browserbase client helpers |
-| `app/confidence.py` | ❌ Phase 3 | Multi-sample scoring (currently hard-coded to 1.0/"high") |
-| `eval/` | ❌ Phase 4 | datasets, generate.py, experiment.py |
-| `app/agent.py` | ❌ Phase 6 | Fetch.ai uAgent wrapper |
+| `app/agents/tutor.py` | ✅ Done | Sonnet, multi-turn tutoring chat — NO checking (study phase) |
+| `app/agents/blogger.py` | ✅ Done | Sonnet, conversation → structured blog post (title + body) |
+| `app/agents/generator.py` | ✅ Done | Sonnet, prompt caching (used by `run_pipeline`) |
+| `app/agents/teacher.py` | ✅ Done | Sonnet, prompt caching (used by `run_pipeline`) |
+| `app/agents/critics.py` | ✅ Done | Haiku, parallel role-differentiated critic swarm |
+| `app/agents/verifier.py` | ✅ Done | Stagehand/Browserbase evidence extraction (capped at 3 claims) |
+| `app/grounding/browser.py` | ✅ Done | Browserbase client helpers |
+| `app/confidence.py` | ✅ Done | Multi-sample semantic-disagreement scoring |
+| `eval/` | ✅ Done | datasets (qa_30, qa_smoke), generate.py (Batch API), experiment.py |
+| `ui/streamlit_app.py` | ✅ Done | Two-phase: chat thread + "Convert to verifiable blog post" → reviewed post |
+| `app/agent.py` | ❌ Phase 6 | Fetch.ai uAgent wrapper (optional) |
 
-**Currently on:** Phase 2 (Accuracy engine — critics + verifier).
+**Currently on:** Phase 5 (education polish — teacher modes, confidence shading, reply boxes) /
+optional Phase 6 (Fetch.ai). Core accuracy engine + eval harness are done.
 
 ### Blog-post-comments data model
 
@@ -82,6 +103,10 @@ Models are implemented as Pydantic `BaseModel` (not dataclasses) in `app/models.
 
 ```python
 from pydantic import BaseModel
+
+class ChatTurn(BaseModel):
+    role: Literal["user", "assistant"]   # the study conversation (tutoring phase)
+    content: str
 
 class AgentComment(BaseModel):
     agent: Literal["generator", "critic", "verifier"]
@@ -92,15 +117,17 @@ class AgentComment(BaseModel):
     url: str | None      # verifier citation
 
 class PipelineResult(BaseModel):
-    answer: str                   # Teacher's final answer — the "blog post"
+    answer: str                   # synthesized artifact — final answer OR blog post body
     comments: list[AgentComment]  # all agent contributions — the "comments"
     confidence: float             # 0.0–1.0
     confidence_level: Literal["high", "medium", "low"]
+    title: str | None = None      # set when the artifact is a blog post
 ```
 
-`run_pipeline` returns a `PipelineResult`. Callers that only need the answer text use `.answer`.
-The Streamlit UI renders the full result as a blog post + comment thread.
-The Fetch.ai handler returns only `.answer` (plain text for ASI:One chat).
+`convert_to_blog_post` and `run_pipeline` both return a `PipelineResult` (the conversion sets
+`.title`). `chat` and `reply_to_comment` return plain reply strings for the tutoring phase.
+The Streamlit UI renders the conversation as a chat thread and the converted result as a blog post +
+comment thread. The Fetch.ai handler returns only `.answer` (plain text for ASI:One chat).
 
 ## Stack (verified June 2026 — confirm exact API surfaces against the linked docs before coding)
 
@@ -193,26 +220,28 @@ Files marked ✅ exist; others are planned.
 ```
 app/
   agents/
-    generator.py        ✅ draft answer → AgentComment(agent="generator")
-    teacher.py          ✅ synthesize, hedge, mode-switch → final answer string
-    critics.py          ← Phase 2: decompose + role-differentiated red-team (parallel) → list[AgentComment]
-    verifier.py         ← Phase 2: Stagehand evidence extraction per claim → list[AgentComment] with urls
-  models.py             ✅ AgentComment + PipelineResult Pydantic models
-  pipeline.py           ✅ asyncio orchestration; exposes run_pipeline() + reply_to_comment()
-  api.py                ✅ FastAPI endpoints: POST /ask -> PipelineResult, POST /reply -> PipelineResult
+    tutor.py            ✅ multi-turn tutoring chat (NO checking) → reply string
+    blogger.py          ✅ conversation → structured blog post (title, body)
+    generator.py        ✅ draft answer → AgentComment(agent="generator") [run_pipeline path]
+    teacher.py          ✅ synthesize, hedge, mode-switch → final answer string [run_pipeline path]
+    critics.py          ✅ decompose + role-differentiated red-team (parallel) → list[AgentComment]
+    verifier.py         ✅ Stagehand evidence extraction per claim → list[AgentComment] with urls
+  models.py             ✅ ChatTurn + AgentComment + PipelineResult Pydantic models
+  pipeline.py           ✅ asyncio orchestration; chat(), convert_to_blog_post(), run_pipeline(), reply_to_comment(); shared _review()
+  api.py                ✅ FastAPI: POST /chat, /convert, /ask, /reply, GET /health
   telemetry.py          ✅ Phoenix register() at import time
-  confidence.py         ← Phase 3: multi-sample + semantic-disagreement scoring → (float, level)
+  confidence.py         ✅ multi-sample + semantic-disagreement scoring → (float, level)
   grounding/
-    browser.py          ← Phase 2: Stagehand/Browserbase client; Search+Fetch helpers
+    browser.py          ✅ Stagehand/Browserbase client; Search+Fetch helpers
   agent.py              ← Phase 6: Fetch.ai uAgent Chat Protocol wrapper (returns result.answer)
 eval/
   datasets/             ✅ directory exists
-    qa_30.jsonl         ← Phase 4: 30 questions w/ known answers
-    qa_smoke.jsonl      ← Phase 4: 5-question smoke set
-  generate.py           ← Phase 4: batch-generate pipeline answers -> Phoenix dataset
-  experiment.py         ← Phase 4: baseline (single Sonnet call) vs full pipeline; logs evals
+    qa_30.jsonl         ✅ 30 questions w/ known answers
+    qa_smoke.jsonl      ✅ 5-question smoke set
+  generate.py           ✅ batch-generate pipeline answers -> result files
+  experiment.py         ✅ baseline (single Sonnet call) vs full pipeline; Haiku judges
 ui/
-  streamlit_app.py      ✅ skeleton (text input + answer); blog-post + comment thread UI ← Phase 5
+  streamlit_app.py      ✅ two-phase: chat thread + "Convert to verifiable blog post" → reviewed post
 .env.example            ✅
 requirements.txt        ✅
 README.md               ✅ (judging writeup — keep current)
@@ -306,19 +335,23 @@ if __name__ == "__main__":
 - **Phase 1 — Spine.** ✅ DONE. Generator → Teacher, `run_pipeline()` + `reply_to_comment()`,
   FastAPI routes (POST /ask, POST /reply), Streamlit skeleton, Phoenix tracing. Models use Pydantic
   `BaseModel`. Confidence is stubbed at 1.0/"high" — to be replaced in Phase 3.
-- **Phase 2 — Accuracy engine.** ← CURRENT. Add parallel critic decomposition + the Browserbase verifier.
+- **Phase 1.5 — Two-phase UX split.** ✅ DONE. Separated the un-checked tutoring conversation
+  (`chat()`, `POST /chat`) from the on-demand review (`convert_to_blog_post()`, `POST /convert`):
+  checking now runs only when the learner converts the conversation into a blog post. `reply_to_comment`
+  re-enters the conversation (via `chat`), not the full pipeline. Added `app/agents/tutor.py` +
+  `app/agents/blogger.py`; Streamlit rewritten to chat + convert.
+- **Phase 2 — Accuracy engine.** ✅ DONE. Parallel critic decomposition + the Browserbase verifier.
   This is where "reduces inaccuracies" becomes true. **Time-box the verifier**; if latency is bad,
   fall back to a single `extract` over one search-results page instead of multi-hop browsing.
-- **Phase 3 — Confidence.** Multi-sample contested claims; semantic disagreement = low confidence.
+- **Phase 3 — Confidence.** ✅ DONE. Multi-sample contested claims; semantic disagreement = low confidence.
   Cheap, and the most impressive-looking part of the demo.
-- **Phase 4 — Proof.** Build the eval harness: batch-generate answers once, run the
-  baseline-vs-pipeline **experiment** in Phoenix. **This number is what wins the room.**
-- **Phase 5 — Education polish.** Blog-post-comments UI in Streamlit: render the Teacher answer as
-  the "post" and each AgentComment as a comment card (role badge, claim, verdict/citation for
-  verifier). Add a reply box under each comment so the learner can ask a follow-up question;
-  on submit, call `reply_to_comment(comment, followup)` which re-runs the pipeline with that
-  agent's context injected. Also add teacher modes (quiz, Socratic) and confidence shading.
-  Reuse Phoenix confidence scores to drive the UI shading (eval layer doubles as a feature).
+- **Phase 4 — Proof.** ✅ DONE (harness built; run the milestone experiments to capture numbers).
+  Eval harness: batch-generate answers once, run the baseline-vs-pipeline **experiment**.
+  **This number is what wins the room.**
+- **Phase 5 — Education polish.** ← CURRENT. Blog-post-comments UI is in place (post + comment cards
+  with role badge, claim, verdict/citation). Still to add: a reply box under each comment that calls
+  `reply_to_comment(comment, followup, messages)` (returns a tutor reply that continues the
+  conversation), teacher modes (quiz, Socratic), and richer confidence shading.
 - **Phase 6 — Fetch.ai exposure (optional, last, 2–3h time-box).** Wrap `run_pipeline` as the
   Chat-Protocol uAgent in `app/agent.py`, run it as a **Mailbox agent**, register on Agentverse, and
   confirm a full **ASI:One round-trip** (type a question in ASI:One → agent answers). See the Fetch.ai
@@ -348,8 +381,10 @@ web access, Arize proves the gain, Fetch.ai is the discoverable entry point. Non
 ## Working conventions for Claude Code
 
 - Prefer small, focused functions and editing over wholesale rewrites.
-- **Everything calls `run_pipeline`** — the FastAPI route, the Streamlit UI, and the Fetch.ai agent
-  are all thin entry points over the same function. Don't fork the pipeline logic per surface.
+- **Surfaces are thin entry points over `app/pipeline.py`** — every UI/route calls `chat()`,
+  `convert_to_blog_post()`, `run_pipeline()`, or `reply_to_comment()`; none reimplement orchestration.
+  The accuracy engine lives once in `_review()` and is shared by the conversion path and `run_pipeline`.
+  Don't fork pipeline logic per surface.
 - **Build the eval harness early** (Phase 4 scaffolding by end of Phase 2) — it's the deliverable.
 - **Respect the cost rules above without being asked.** Never add Opus to a loop. Never run a full
   eval synchronously. Always cache shared prompts.
@@ -361,10 +396,10 @@ web access, Arize proves the gain, Fetch.ai is the discoverable entry point. Non
 
 ## Definition of done (demo checklist)
 
-- [ ] Ask a question → get a verified answer with confidence shading + system-found citations. *(confidence stubbed — Phase 3)*
-- [ ] Answer is presented as a blog post; agent contributions appear as comment cards. *(UI skeleton only — Phase 5)*
-- [ ] Reply to any agent comment → follow-up answer generated with that agent's context. *(`reply_to_comment()` exists; needs critics/verifier to produce real comments — Phase 2)*
-- [ ] One Phoenix experiment slide: single-model baseline vs full pipeline, factuality delta. *(Phase 4)*
+- [x] Study with the tutor (no checking) → click "Convert to verifiable blog post" → reviewed post with confidence shading + system-found citations. *(`chat()` + `convert_to_blog_post()` done)*
+- [x] Result is presented as a blog post; agent contributions appear as comment cards. *(Streamlit done; reply boxes pending — Phase 5)*
+- [ ] Reply to any agent comment → follow-up generated with that agent's context. *(`reply_to_comment()` done; needs reply-box wiring in the UI — Phase 5)*
+- [ ] One Phoenix experiment slide: single-model baseline vs full pipeline, factuality delta. *(harness done; run the experiment to capture the number)*
 - [ ] At least one teacher mode beyond plain explain (quiz or Socratic). *(Phase 5)*
 - [x] README exists. *(needs accuracy-gain framing once eval numbers are in)*
 - [ ] (If Phase 6) Tutor registered on Agentverse and answers end-to-end via ASI:One chat.
