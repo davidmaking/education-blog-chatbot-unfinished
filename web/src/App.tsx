@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import {
   Sparkles,
   ShieldCheck,
@@ -22,6 +23,30 @@ import {
   type Paragraph as ParagraphT,
 } from "./api";
 import CursorEffects from "./CursorEffects";
+
+function Prose({ children, className = "" }: { children: string; className?: string }) {
+  return (
+    <ReactMarkdown
+      className={`prose-sourcerer ${className}`}
+      components={{
+        p: ({ children }) => <p className="mb-2 last:mb-0 leading-[1.75]">{children}</p>,
+        strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+        em: ({ children }) => <em className="italic text-muted">{children}</em>,
+        h1: ({ children }) => <h1 className="mb-2 mt-3 text-lg font-bold text-gold first:mt-0">{children}</h1>,
+        h2: ({ children }) => <h2 className="mb-2 mt-3 text-base font-semibold text-gold first:mt-0">{children}</h2>,
+        h3: ({ children }) => <h3 className="mb-1 mt-2 text-sm font-semibold text-gold-dim first:mt-0">{children}</h3>,
+        ul: ({ children }) => <ul className="mb-2 ml-4 list-disc space-y-0.5">{children}</ul>,
+        ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal space-y-0.5">{children}</ol>,
+        li: ({ children }) => <li className="leading-[1.7]">{children}</li>,
+        code: ({ children }) => <code className="rounded bg-surface-raised px-1 py-0.5 font-mono text-[13px] text-gold-dim">{children}</code>,
+        hr: () => <hr className="my-3 border-border" />,
+        blockquote: ({ children }) => <blockquote className="border-l-2 border-gold/40 pl-3 italic text-muted">{children}</blockquote>,
+      }}
+    >
+      {children}
+    </ReactMarkdown>
+  );
+}
 
 type AppState = "home" | "chat" | "loading" | "workspace";
 
@@ -230,11 +255,11 @@ function ChatView({
               <div
                 className={
                   m.role === "user"
-                    ? "max-w-[85%] whitespace-pre-wrap rounded-2xl bg-gold/20 border border-gold/30 px-4 py-2.5 text-[15px] leading-[1.7] text-foreground"
-                    : "max-w-[85%] whitespace-pre-wrap rounded-2xl border border-border bg-surface px-4 py-2.5 text-[15px] leading-[1.75]"
+                    ? "max-w-[85%] rounded-2xl bg-gold/20 border border-gold/30 px-4 py-2.5 text-[15px] text-foreground"
+                    : "max-w-[85%] rounded-2xl border border-border bg-surface px-4 py-2.5 text-[15px]"
                 }
               >
-                {m.content}
+                <Prose>{m.content}</Prose>
               </div>
             </div>
           ))}
@@ -400,7 +425,7 @@ function AgentCard({
       {comment.claim && (
         <p className="mt-2 text-xs italic text-muted">on: "{comment.claim}"</p>
       )}
-      <p className="mt-2 text-[14px] leading-[1.65]">{comment.content}</p>
+      <div className="mt-2 text-[14px]"><Prose>{comment.content}</Prose></div>
 
       {comment.url && (
         <a
@@ -486,11 +511,11 @@ function AgentCard({
               <div className="ml-auto w-fit max-w-[90%] rounded-lg bg-gold/20 border border-gold/30 px-3 py-2 text-[13px] leading-[1.5] text-foreground">
                 {ex.q}
               </div>
-              <div className="rounded-lg bg-surface-raised p-3 text-[13px] leading-[1.6]">
+              <div className="rounded-lg bg-surface-raised p-3 text-[13px]">
                 <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-gold-dim">
                   Tutor reply
                 </span>
-                {ex.a}
+                <Prose>{ex.a}</Prose>
               </div>
             </div>
           ))}
