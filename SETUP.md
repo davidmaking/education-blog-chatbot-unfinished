@@ -53,9 +53,16 @@ Confirm it's running: http://localhost:8000/health → `{"status": "ok"}`
 ```bash
 cd web
 npm install        # first time only
-npm run dev
+npm run dev        # http://localhost:5173
 ```
-Opens at http://localhost:5173. It proxies `/api/*` to the backend on :8000, so Terminal 2 must be running.
+Vite proxies `/api/*` to the FastAPI backend on :8000 — Terminal 2 must be running first.
+
+Other useful frontend commands (run from `web/`):
+```bash
+npm run typecheck  # TypeScript check without building
+npm run build      # production build → web/dist/
+npm run preview    # serve the production build locally
+```
 
 > Minimal fallback UI (optional): `streamlit run ui/streamlit_app.py` → http://localhost:8501.
 
@@ -211,6 +218,7 @@ The Sourcerer pipeline can also run as a Fetch.ai Chat Protocol agent, discovera
 | Variable | Required for | Where to get it |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Everything | [console.anthropic.com](https://console.anthropic.com) → API Keys |
+| `PHOENIX_API_KEY` | Arize cloud traces (optional) | [app.phoenix.arize.com](https://app.phoenix.arize.com) → Settings → API Keys — omit to use local Phoenix on :6006 |
 | `BROWSERBASE_API_KEY` | Verifier (optional) | [browserbase.com](https://browserbase.com) → Dashboard |
 | `BROWSERBASE_PROJECT_ID` | Verifier (optional) | Browserbase Dashboard → Projects |
 | `MODEL_API_KEY` | Verifier (optional) | Same value as `ANTHROPIC_API_KEY` |
